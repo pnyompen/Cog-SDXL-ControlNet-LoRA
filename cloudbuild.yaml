@@ -5,8 +5,6 @@ steps:
       - --destination=gcr.io/${_PROJECT_ID}/${_SERVICE_NAME}:latest
       - --cache=true
       - --cache-ttl=48h
-      - --compressed-caching=false
-      - --cache-copy-layers=true
       - --build-arg=REPLICATE_API_TOKEN=${_REPLICATE_API_TOKEN}
       - --build-arg=MODEL_NAME=${_MODEL_NAME}
 timeout: 5400s

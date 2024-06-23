@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from weights import WeightsDownloadCache
 from tqdm import tqdm
 from pathlib import Path
-import asyncio
+import threading
 
 import numpy as np
 import torch
@@ -66,7 +66,7 @@ SCHEDULERS = {
 }
 
 
-async def download_weight(url: str, dest: str):
+def download_weight(url: str, dest: str):
     start = time.time()
     print("downloading url: ", url)
     print("downloading to: ", dest)
@@ -74,8 +74,17 @@ async def download_weight(url: str, dest: str):
     print("downloading took: ", time.time() - start)
 
 
-async def download_weights(tasks: List[Tuple[str, str]]):
-    await asyncio.gather(*[download_weight(url, dest) for url, dest in tasks])
+def download_weights(tasks: List[Tuple[str, str]]):
+    # スレッドを作成してコマンドを実行
+    threads = []
+    for url, dest in tasks:
+        thread = threading.Thread(target=download_weight, args=(url, dest))
+        thread.start()
+        threads.append(thread)
+
+    # 全てのスレッドが終了するのを待つ
+    for thread in threads:
+        thread.join()
 
 
 class Predictor(BasePredictor):
@@ -195,7 +204,7 @@ class Predictor(BasePredictor):
             download_tasks.append((SDXL_URL, SDXL_MODEL_CACHE))
 
         if download_tasks:
-            asyncio.run(download_weights(download_tasks))
+            download_weights(download_tasks)
 
         self.blip_processor = BlipProcessor.from_pretrained(
             BLIP_PROCESSOR_PATH)
