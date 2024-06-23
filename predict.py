@@ -5,6 +5,9 @@ import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from weights import WeightsDownloadCache
+from tqdm import tqdm
+from pathlib import Path
+import asyncio
 
 import numpy as np
 import torch
@@ -24,6 +27,11 @@ from diffusers import (
 )
 from diffusers.models.attention_processor import LoRAAttnProcessor2_0
 
+from transformers import (
+    BlipForConditionalGeneration,
+    BlipProcessor,
+)
+
 from diffusers.utils import load_image
 from safetensors.torch import load_file
 
@@ -34,6 +42,12 @@ SDXL_MODEL_CACHE = "./sdxl-cache"
 FEATURE_EXTRACTOR = "./feature-extractor"
 SDXL_URL = "https://weights.replicate.delivery/default/sdxl/sdxl-vae-upcast-fix.tar"
 WEIGHT_CACHE_DIR = "./weights-cache"
+
+# model is fixed to Salesforce/blip-image-captioning-large
+BLIP_URL = "https://weights.replicate.delivery/default/blip_large/blip_large.tar"
+BLIP_PROCESSOR_URL = "https://weights.replicate.delivery/default/blip_processor/blip_processor.tar"
+BLIP_PATH = "./blip-cache/blip_large"
+BLIP_PROCESSOR_PATH = "./blip-cache/blip_processor"
 
 
 class KarrasDPM:
@@ -52,12 +66,16 @@ SCHEDULERS = {
 }
 
 
-def download_weights(url, dest):
+async def download_weight(url: str, dest: str):
     start = time.time()
     print("downloading url: ", url)
     print("downloading to: ", dest)
     subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
     print("downloading took: ", time.time() - start)
+
+
+async def download_weights(tasks: List[Tuple[str, str]]):
+    await asyncio.gather(*[download_weight(url, dest) for url, dest in tasks])
 
 
 class Predictor(BasePredictor):
@@ -168,8 +186,21 @@ class Predictor(BasePredictor):
 
         self.weights_cache = WeightsDownloadCache(base_dir=WEIGHT_CACHE_DIR)
 
+        download_tasks = []
+        if not os.path.exists(BLIP_PROCESSOR_PATH):
+            download_tasks.append((BLIP_PROCESSOR_URL, BLIP_PROCESSOR_PATH))
+        if not os.path.exists(BLIP_PATH):
+            download_tasks.append((BLIP_URL, BLIP_PATH))
         if not os.path.exists(SDXL_MODEL_CACHE):
-            download_weights(SDXL_URL, SDXL_MODEL_CACHE)
+            download_tasks.append((SDXL_URL, SDXL_MODEL_CACHE))
+
+        if download_tasks:
+            asyncio.run(download_weights(download_tasks))
+
+        self.blip_processor = BlipProcessor.from_pretrained(
+            BLIP_PROCESSOR_PATH)
+        self.blip_model = BlipForConditionalGeneration.from_pretrained(
+            BLIP_PATH).to(self.device)
 
         controlnet = ControlNetModel.from_pretrained(
             CONTROL_CACHE,
@@ -251,6 +282,46 @@ class Predictor(BasePredictor):
         image = np.concatenate([image, image, image], axis=2)
         return Image.fromarray(image)
 
+    @torch.no_grad()
+    def blip_captioning_dataset(
+        self,
+        images: List[Image.Image],
+        text: Optional[str] = None,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        substitution_tokens: Optional[List[str]] = None,
+        **kwargs,
+    ) -> List[str]:
+        """
+        Returns a list of captions for the given images
+        """
+        captions = []
+        if text is not None:
+            text = text.strip()
+            print(f"Input captioning text: {text}")
+        for image in tqdm(images):
+            inputs = self.blip_processor(
+                image, return_tensors="pt").to(self.device)
+            out = self.blip_model.generate(
+                **inputs, max_length=150, do_sample=True, top_k=50, temperature=0.7
+            )
+            caption = self.blip_processor.decode(
+                out[0], skip_special_tokens=True)
+
+            # BLIP 2 lowercases all caps tokens. This should properly replace them w/o messing up subwords. I'm sure there's a better way to do this.
+            if substitution_tokens is not None:
+                for token in substitution_tokens:
+                    print(token)
+                    sub_cap = " " + caption + " "
+                    print(sub_cap)
+                    sub_cap = sub_cap.replace(
+                        " " + token.lower() + " ", " " + token + " ")
+                    caption = sub_cap.strip()
+
+            if text is not None:
+                captions.append(text + " " + caption)
+        print("Generated captions", captions)
+        return captions
+
     @torch.inference_mode()
     def predict(
         self,
@@ -264,7 +335,11 @@ class Predictor(BasePredictor):
         ),
         img2img: bool = Input(
             description="Use img2img pipeline, it will use the image input both as the control image and the base image.",
-            default=None
+            default=False
+        ),
+        auto_generate_caption: bool = Input(
+            description="Use BLIP to generate captions for the input images",
+            default=False
         ),
         condition_scale: float = Input(
             description="The bigger this number is, the more ControlNet interferes",
@@ -331,9 +406,14 @@ class Predictor(BasePredictor):
             # consistency with fine-tuning API
             for k, v in self.token_map.items():
                 prompt = prompt.replace(k, v)
-        print(f"Prompt: {prompt}")
         image = self.load_image(image)
         image, width, height = self.resize_image(image)
+
+        if auto_generate_caption:
+            print("auto_generate_caption mode")
+            captions = self.blip_captioning_dataset([image], prompt)
+            prompt = captions[0]
+        print(f"Prompt: {prompt}")
 
         if (img2img):
             print("img2img mode")
