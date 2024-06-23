@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import shutil
@@ -14,7 +13,6 @@ from cog import BasePredictor, Input, Path
 from PIL import Image
 from diffusers import (
     DDIMScheduler,
-    DiffusionPipeline,
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
@@ -25,11 +23,8 @@ from diffusers import (
     ControlNetModel
 )
 from diffusers.models.attention_processor import LoRAAttnProcessor2_0
-from diffusers.pipelines.stable_diffusion.safety_checker import (
-    StableDiffusionSafetyChecker,
-)
+
 from diffusers.utils import load_image
-from safetensors import safe_open
 from safetensors.torch import load_file
 
 from dataset_and_utils import TokenEmbeddingsHandler
