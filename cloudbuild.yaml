@@ -1,0 +1,10 @@
+steps:
+  # build the container image with cache
+  - name: 'gcr.io/kaniko-project/executor:v0.22.0'
+    args: 
+      - --destination=gcr.io/${_PROJECT_ID}/${_SERVICE_NAME}:latest
+      - --cache=true
+      - --cache-ttl=6h
+      - --build-arg=REPLICATE_API_TOKEN=${_REPLICATE_API_TOKEN}
+      - --build-arg=MODEL_NAME=${_MODEL_NAME}
+timeout: 5400s

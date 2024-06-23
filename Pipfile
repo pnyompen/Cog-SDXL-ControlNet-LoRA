@@ -1,0 +1,39 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[[source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+verify_ssl = true
+
+[packages]
+diffusers = "==0.21.4"
+torch = {version = "==2.0.1", index = "pytorch"}
+torchvision = {version = "==0.15.2", index = "pytorch"}
+transformers = "==4.34.0"
+accelerate = "==0.21.0"
+pandas = "==2.0.3"
+numpy = "==1.25.1"
+fire = "==0.5.0"
+opencv-python = ">=4.1.0.25"
+mediapipe = "==0.10.2"
+
+[dev-packages]
+flake8 = "*"
+autopep8 = "*"
+pytest = "*"
+pytest-cov = "*"
+
+[requires]
+python_version = "3.9"
+
+[scripts]
+tests = 'pytest -v --cov=. --capture=no -s'
+setproject = 'gcloud config set project $PROJECT_ID'
+build = '''
+    gcloud builds submit
+    --config=cloudbuild.yaml
+    --substitutions=_SERVICE_NAME="$SERVICE_NAME",_PROJECT_ID="$PROJECT_ID",_REPLICATE_API_TOKEN="$REPLICATE_API_TOKEN",_MODEL_NAME="$MODEL_NAME"
+'''

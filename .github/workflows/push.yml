@@ -1,0 +1,49 @@
+name: Push to Replicate
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'Enter the model name, like "alice/bunny-detector"'
+        required: true
+  push:
+    branches:
+      - main
+
+jobs:
+  push_to_replicate:
+    name: Push to Replicate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk pace
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          docker-images: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download weights
+        run: |
+          pip install -r requirements.txt
+          python script/download_weights.py
+
+      - name: Setup Cog
+        uses: replicate/setup-cog@v2
+        with:
+          token: ${{ secrets.REPLICATE_API_TOKEN }}
+          install-cuda: true
+          
+      - name: free disk space
+        run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          rm -rf ~/.cache/pip
+          rm -rf ~/.cache/huggingface
+          docker rmi $(docker image ls -aq)
+          df -h
+
+      - name: Push to Replicate
+        run: cog push r8.im/${{ inputs.model_name || vars.DEFAULT_MODEL_NAME }}
